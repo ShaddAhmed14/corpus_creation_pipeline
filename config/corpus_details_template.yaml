@@ -1,0 +1,19 @@
+num_workers: 4 # num of workers for parallel processing. adjust based on your system capabilities.
+create_clips: true # set to false if you only want to create metadata and summary plots without re-creating clips
+
+defaults:
+  output_directory: "PATH_TO_OUTPUT_DIRECTORY" # Replace with the desired output directory path
+  gesture_label: Gesture
+  gesture_output_directory: GestureClips
+  no_gesture_label: NoGesture
+  no_gesture_output_directory: NoGestureClips
+  move_label: Move
+  move_output_directory: MoveClips
+  clips_info_directory: ClipsInfo/
+  decreasing_factor: 0.9 # Factor to decrease clip duration for each subsequent attempt when trying to find valid clips
+  
+corpora:
+  - name: CORPUS_NAME
+    directory: CORPUS_DIRECTORY_PATH # Replace with the path to the corpus directory
+    module: corpora.CORPUS_MODULE # Replace with the appropriate module for the corpus
+    enabled: true
