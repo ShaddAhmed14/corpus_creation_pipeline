@@ -141,7 +141,23 @@ def build_df(training_set: dict, testing_set: dict):
  
     return detailed_df, summary_df
 
-def run_split_pipeline(by_corpus_data: dict, files_folder_path: Path, file_extension: str, train_ratio: float, metadata_detailed_path: str, metadata_summary_path: str):
+def create_split_folder(detailed_df: pd.DataFrame, output_directory: Path):
+    sets = detailed_df['set'].unique()
+    labels = detailed_df['label'].unique()
+    for s in sets:
+        for l in labels:
+            s_l_dir = output_directory / s / l
+            s_l_dir.mkdir(exist_ok=True, parents=True)
+            files_to_copy = detailed_df[(detailed_df['set'] == s) & (detailed_df['label'] == l)]['file_path']
+            for file_path in files_to_copy:
+                try:
+                    destination = s_l_dir / file_path.name
+                    if not destination.exists():
+                        destination.write_bytes(file_path.read_bytes())
+                except Exception as e:
+                    print(f"Error occurred while copying {file_path} to {s_l_dir}: {e}")
+
+def run_split_pipeline(by_corpus_data: dict, files_folder_path: Path, file_extension: str, train_ratio: float, metadata_detailed_path: str, metadata_summary_path: str, output_directory: Path, copy_files: bool):
     files_mapping = create_files_mapping(by_corpus_data, files_folder_path, file_extension)
 
     # these 2 need special treatment - we initialize training and testing sets from here
@@ -164,3 +180,9 @@ def run_split_pipeline(by_corpus_data: dict, files_folder_path: Path, file_exten
     metadata_detailed_df.to_csv(metadata_detailed_path, index=False)
     metadata_summary_df.to_csv(metadata_summary_path, index=False)
     print("Saved metadata csv files")
+
+    if copy_files:
+        create_split_folder(metadata_detailed_df, output_directory)
+        print("Copied files to split folders")
+    else:
+        print("File copying skipped as per configuration")
