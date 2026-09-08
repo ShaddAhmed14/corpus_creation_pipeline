@@ -15,6 +15,7 @@ class Corpus(ABC):
         self.directory = directory
         self.decreasing_factor = defaults.get('decreasing_factor', 0.9)
         self.padding = defaults.get('padding', 1.0)
+        self.legacy_conversion = defaults.get('legacy_conversion', False)
         self.clips_info_dir = Path(defaults.get('clips_info_directory', 'ClipsInfo'))
         self.gesture_output_dir = Path(defaults.get('gesture_output_directory', 'GestureClips'))
         self.no_gesture_output_dir = Path(defaults.get('no_gesture_output_directory', 'NoGestureClips'))
@@ -86,13 +87,12 @@ class Corpus(ABC):
 
         return True
 
-    # TODO make this False by defalt
-    def load_clips_info(self, base_name: str, corpus_name: str, source_video_path: Path, legacy_conversion: bool = False):
+    def load_clips_info(self, base_name: str, corpus_name: str, source_video_path: Path):
         file_path = self.clips_info_dir / f'{corpus_name}_{base_name}_clips_info.json'
         with open(file_path, 'r') as f:
             clips_info = json.load(f)
 
-        if legacy_conversion:
+        if self.legacy_conversion:
             # add missing fields and replace the file
             clips_info = legacy_convert_clips_info(clips_info, file_path, source_video_path, self.calculate_padding)
 
