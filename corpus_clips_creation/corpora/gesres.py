@@ -131,7 +131,7 @@ class GesRes(Corpus):
             logging.info(f"Corpus {self.name} - Clips info already exists for {video_id}, skipping processing.")
             all_clips = self.load_clips_info(video_id, self.name, video_path)
 
-        self.render_clips(video_path, all_clips, video_duration)
+        self.render_clips(video_path, all_clips)
 
     def process_annotation_file_special(self, video_gestures: pd.DataFrame, video_id: str):
         # Get gesture annotations for this video
