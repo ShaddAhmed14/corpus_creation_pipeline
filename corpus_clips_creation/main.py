@@ -65,6 +65,11 @@ def main():
 
     create_clips = config.get('create_clips', True)
     if create_clips:
+        logging.info(f"decreasing_factor: {defaults.get('decreasing_factor', 0.9)}")
+        logging.info(f"padding: {defaults.get('padding', 1.0)}")
+        logging.info(f"legacy_conversion: {defaults.get('legacy_conversion', False)}")
+        logging.info(f"Skip Re-rendering: {defaults.get('skip_re_rendering', False)}")
+
         corpora = config.get('corpora', [])
         if not corpora:
             raise ValueError("Corpora section is missing or empty in the configuration file.")
