@@ -1,5 +1,6 @@
 import json
 import re
+import os
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -17,6 +18,7 @@ class Corpus(ABC):
         self.padding = defaults.get('padding', 1.0)
         self.legacy_conversion = defaults.get('legacy_conversion', False)
         self.clips_info_dir = Path(defaults.get('clips_info_directory', 'ClipsInfo'))
+        self.skip_re_rendering = defaults.get('skip_re_rendering', True)
         self.gesture_output_dir = Path(defaults.get('gesture_output_directory', 'GestureClips'))
         self.no_gesture_output_dir = Path(defaults.get('no_gesture_output_directory', 'NoGestureClips'))
         self.move_output_dir = Path(defaults.get('move_output_directory', 'MoveClips'))
@@ -57,7 +59,12 @@ class Corpus(ABC):
 
     def render_clips(self, video_file_path: Path, clips: List[ClipInfo]):
         for clip in clips:
-            extract_clip_with_padding(video_file_path, clip.output_path, clip.padded_start, clip.padded_end)
+            # render if clip doesnt exist or configured to re-render existing clips
+            if not (os.path.exists(str(clip.output_path)) and self.skip_re_rendering):
+                extract_clip_with_padding(video_file_path, clip.output_path, clip.padded_start, clip.padded_end)
+                print(f"Corpus {self.name} - Rendered clip {clip.output_path} from {clip.padded_start:.2f}s to {clip.padded_end:.2f}s")
+            else:
+                print(f"Corpus {self.name} - Clip already exists at {clip.output_path}, skipping rendering.")
 
     def save_clips_info(self, clips: List[ClipInfo], base_name: str, corpus_name: str):
         all_clips_info = []
