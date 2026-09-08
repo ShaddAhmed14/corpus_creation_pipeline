@@ -55,7 +55,7 @@ class GesRes(Corpus):
                 self.process_annotation_file(video_gestures, video_id)
             print(f"Corpus {self.name} - Processed {idx + 1}/{len(self.valid_speakers)} annotation files")
 
-    def extract_gesture_clips(self, video_gestures: pd.DataFrame, video_duration: float, video_id: str):
+    def extract_gesture_clips(self, video_gestures: pd.DataFrame, video_duration: float, video_id: str, source_video_path: Path):
         extracted_gestures = []
         for idx, row in video_gestures.iterrows():
             gesture_start = row['start_t']
@@ -76,6 +76,8 @@ class GesRes(Corpus):
                 or not gesture_end > gesture_start:
                 continue
 
+            padded_start, padded_end = self.calculate_padding(gesture_start, gesture_end, video_duration)
+
             clip_info = ClipInfo(
                 id=idx,
                 label=label,
@@ -83,45 +85,52 @@ class GesRes(Corpus):
                 start=gesture_start,
                 end=gesture_end,
                 output_path=gesture_output_path,
+                padded_start=padded_start,
+                padded_end=padded_end,
+                video_duration=video_duration,
+                source_video_path=source_video_path
             )
             extracted_gestures.append(clip_info)
         return extracted_gestures
 
     def process_annotation_file(self, video_gestures: pd.DataFrame, video_id: str):
-        if self.check_clips_info_exists(video_id, self.name):
-            logging.info(f"Corpus {self.name} - Clips info already exists for {video_id}, skipping processing.")
-            return # Skip processing if clips info already exists for this file
-        
-        # Get gesture annotations for this video
-        if len(video_gestures) == 0:
-            logging.error(f"Corpus {self.name}: No gesture data found for {video_id}")
-            return
-        
         video_path = self.full_videos_dir /  f"{video_id}.mp4"
         if not os.path.exists(video_path):
             logging.error(f"Corpus {self.name}: Video file not found: {video_path}")
             return
-        video_duration = get_video_info(video_path).get('duration', 0)
-        if video_duration == 0:
-            logging.error(f"Corpus {self.name}: Could not determine duration for {video_path}, skipping...")
-            return
         
-        # Sort gestures by start time
-        video_gestures = video_gestures.sort_values('start_t')
-        # extract clips
-        gesture_clips = self.extract_gesture_clips(video_gestures, video_duration, video_id)
-        if not gesture_clips:
-            logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {video_id}")
-            return
-        
-        gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
-        if not gaps:
-            logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_path}")
-            return
-        no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, video_id)
+        if not self.check_clips_info_exists(video_id, self.name):
+            logging.info(f"Corpus {self.name} - Processing video {video_path}")
+            # Get gesture annotations for this video
+            if len(video_gestures) == 0:
+                logging.error(f"Corpus {self.name}: No gesture data found for {video_id}")
+                return
+            
+            video_duration = get_video_info(video_path).get('duration', 0)
+            if video_duration == 0:
+                logging.error(f"Corpus {self.name}: Could not determine duration for {video_path}, skipping...")
+                return
+            
+            # Sort gestures by start time
+            video_gestures = video_gestures.sort_values('start_t')
+            # extract clips
+            gesture_clips = self.extract_gesture_clips(video_gestures, video_duration, video_id, video_path)
+            if not gesture_clips:
+                logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {video_id}")
+                return
+            
+            gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
+            if not gaps:
+                logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_path}")
+                return
+            no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, video_id)
 
-        all_clips = gesture_clips + no_gesture_clips
-        self.save_clips_info(all_clips, video_id, self.name)
+            all_clips = gesture_clips + no_gesture_clips
+            self.save_clips_info(all_clips, video_id, self.name)
+        else:
+            logging.info(f"Corpus {self.name} - Clips info already exists for {video_id}, skipping processing.")
+            all_clips = self.load_clips_info(video_id, self.name, video_path)
+
         self.render_clips(video_path, all_clips, video_duration)
 
     def process_annotation_file_special(self, video_gestures: pd.DataFrame, video_id: str):
@@ -136,50 +145,50 @@ class GesRes(Corpus):
         base_name_front = video_path_front.stem
         base_name_side = video_path_side.stem
 
-        if self.check_clips_info_exists(base_name_front, self.name) and self.check_clips_info_exists(base_name_side, self.name):
-            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name_front} and {base_name_side}, skipping processing.")
-            return # Skip processing if clips info already exists for this file
-        
-
         if not os.path.exists(input_video_path):
             logging.error(f"Corpus {self.name}: Special speaker video file not found: {input_video_path}")
             return
-        
         split_video_horizontally(input_video_path, video_path_front, video_path_side)
         if not os.path.exists(video_path_front) or not os.path.exists(video_path_side):
             logging.error(f"Corpus {self.name}: Video file not found: {video_path_front} or {video_path_side}")
             return
-
-        video_duration = get_video_info(video_path_front).get('duration', 0)
-        if video_duration == 0:
-            logging.error(f"Corpus {self.name}: Could not determine duration for {video_path_front}, skipping...")
-            return
         
-        # Sort gestures by start time
-        video_gestures = video_gestures.sort_values('start_t')
-        gesture_clips_front = self.extract_gesture_clips(video_gestures, video_duration, video_path_front.stem)
-        gesture_clips_side = self.extract_gesture_clips(video_gestures, video_duration, video_path_side.stem)
+        if not self.check_clips_info_exists(base_name_front, self.name) and not self.check_clips_info_exists(base_name_side, self.name):
+            logging.info(f"Corpus {self.name} - Processing special speaker video {video_id}")
+            video_duration = get_video_info(video_path_front).get('duration', 0)
+            if video_duration == 0:
+                logging.error(f"Corpus {self.name}: Could not determine duration for {video_path_front}, skipping...")
+                return
+            
+            # Sort gestures by start time
+            video_gestures = video_gestures.sort_values('start_t')
+            gesture_clips_front = self.extract_gesture_clips(video_gestures, video_duration, video_path_front.stem)
+            gesture_clips_side = self.extract_gesture_clips(video_gestures, video_duration, video_path_side.stem)
 
-        if not gesture_clips_front:
-            logging.error(f"Corpus {self.name} - No valid front gesture clips extracted from {video_id}")
-            return
-        if not gesture_clips_side:
-            logging.error(f"Corpus {self.name} - No valid side gesture clips extracted from {video_id}")
-            return        
+            if not gesture_clips_front:
+                logging.error(f"Corpus {self.name} - No valid front gesture clips extracted from {video_id}")
+                return
+            if not gesture_clips_side:
+                logging.error(f"Corpus {self.name} - No valid side gesture clips extracted from {video_id}")
+                return        
 
+            # gaps will be identical for both views since they have same timestamps
+            gaps = self.find_gaps_between_gestures(gesture_clips_front, video_duration)
+            if not gaps:
+                logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_path_front}")
+                return
+            no_gesture_clips_front = self.extract_no_gesture_clips(gesture_clips_front, gaps, base_name_front)
+            no_gesture_clips_side = self.extract_no_gesture_clips(gesture_clips_side, gaps, base_name_side)
 
-        # gaps will be identical for both views since they have same timestamps
-        gaps = self.find_gaps_between_gestures(gesture_clips_front, video_duration)
-        if not gaps:
-            logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_path_front}")
-            return
-        no_gesture_clips_front = self.extract_no_gesture_clips(gesture_clips_front, gaps, base_name_front)
-        no_gesture_clips_side = self.extract_no_gesture_clips(gesture_clips_side, gaps, base_name_side)
+            all_clips_front = gesture_clips_front + no_gesture_clips_front
+            all_clips_side = gesture_clips_side + no_gesture_clips_side
 
-        all_clips_front = gesture_clips_front + no_gesture_clips_front
-        all_clips_side = gesture_clips_side + no_gesture_clips_side
-
-        self.save_clips_info(all_clips_front, base_name_front, self.name)
-        self.render_clips(video_path_front, all_clips_front, video_duration)
-        self.save_clips_info(all_clips_side, base_name_side, self.name)
-        self.render_clips(video_path_side, all_clips_side, video_duration)
+            self.save_clips_info(all_clips_front, base_name_front, self.name)
+            self.save_clips_info(all_clips_side, base_name_side, self.name)
+        else:
+            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name_front} and {base_name_side}, skipping processing.")
+            all_clips_front = self.load_clips_info(base_name_front, self.name, video_path_front)
+            all_clips_side = self.load_clips_info(base_name_side, self.name, video_path_side)
+        
+        self.render_clips(video_path_front, all_clips_front)
+        self.render_clips(video_path_side, all_clips_side)

@@ -13,6 +13,10 @@ class ClipInfo:
     start: float
     end: float
     output_path: Path
+    padded_start: float
+    padded_end: float
+    video_duration: float
+    source_video_path: Path
     type: str = None
 
 @dataclass
@@ -99,12 +103,26 @@ def return_file_output_path(output_dir: Path, corpus_name: str, video_name: str,
 def sanitize_filename_component(value: str) -> str:
     return "".join(character if character.isalnum() else "_" for character in str(value)).strip("_") or "unknown"
 
-def extract_clip_with_padding(input_file_path: Path, output_file_path: Path, start_time: float, end_time: float, video_duration: float, padding=1.0):
+def legacy_convert_clips_info(clips_info: list, save_path: Path, source_video_path: Path, padding_function: callable):
+    """Add new fields to legacy clips info and save to a new file"""
+    video_duration = get_video_info(source_video_path)['duration']
+    for clip in clips_info:
+        start_time = clip['start']
+        end_time = clip['end']
+        padded_start, padded_end = padding_function(start_time, end_time, video_duration)
+        clip['padded_start'] = padded_start
+        clip['padded_end'] = padded_end
+        clip['video_duration'] = video_duration
+        clip['source_video_path'] = str(source_video_path)
+
+    with open(save_path, 'w') as f:
+        json.dump(clips_info, f, indent=4)
+
+    return clips_info
+
+def extract_clip_with_padding(input_file_path: Path, output_file_path: Path, padded_start: float, padded_end: float):
     """Extract clip using ffmpeg with padding before and after"""
     try:
-        # Add padding and ensure we don't go out of bounds
-        padded_start = max(0, start_time - padding)
-        padded_end = min(video_duration, end_time + padding)
         clip_duration = padded_end - padded_start
         
         cmd = [

@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List
-from utils import ClipInfo, GapInfo, return_file_output_path, extract_clip_with_padding
+from utils import ClipInfo, GapInfo, return_file_output_path, extract_clip_with_padding, legacy_convert_clips_info
 
 import random
 random.seed(42) # set a seed for reproducibility
@@ -14,6 +14,7 @@ class Corpus(ABC):
         self.name = name
         self.directory = directory
         self.decreasing_factor = defaults.get('decreasing_factor', 0.9)
+        self.padding = defaults.get('padding', 1.0)
         self.clips_info_dir = Path(defaults.get('clips_info_directory', 'ClipsInfo'))
         self.gesture_output_dir = Path(defaults.get('gesture_output_directory', 'GestureClips'))
         self.no_gesture_output_dir = Path(defaults.get('no_gesture_output_directory', 'NoGestureClips'))
@@ -47,9 +48,15 @@ class Corpus(ABC):
             clean_name = "unknown"
         return clean_name
 
-    def render_clips(self, video_file_path: Path, clips: List[ClipInfo], video_duration: float):
+    def calculate_padding(self, start_time: float, end_time: float, video_duration: float):
+        """Calculate padding for a clip, ensuring it doesn't exceed video bounds"""
+        padded_start = max(0, start_time - self.padding)
+        padded_end = min(video_duration, end_time + self.padding)
+        return padded_start, padded_end
+
+    def render_clips(self, video_file_path: Path, clips: List[ClipInfo]):
         for clip in clips:
-            extract_clip_with_padding(video_file_path, clip.output_path, clip.start, clip.end, video_duration, padding=1.0)
+            extract_clip_with_padding(video_file_path, clip.output_path, clip.padded_start, clip.padded_end)
 
     def save_clips_info(self, clips: List[ClipInfo], base_name: str, corpus_name: str):
         all_clips_info = []
@@ -60,6 +67,10 @@ class Corpus(ABC):
                 'type': clip.type,
                 'start': clip.start,
                 'end': clip.end,
+                'padded_start': clip.padded_start,
+                'padded_end': clip.padded_end,
+                'video_duration': clip.video_duration,
+                'source_video_path': str(clip.source_video_path),
                 'output_path': str(clip.output_path)
             })
         with open(self.clips_info_dir / f'{corpus_name}_{base_name}_clips_info.json', 'w+') as f:
@@ -74,6 +85,18 @@ class Corpus(ABC):
                 return False
 
         return True
+
+    # TODO make this False by defalt
+    def load_clips_info(self, base_name: str, corpus_name: str, source_video_path: Path, legacy_conversion: bool = False):
+        file_path = self.clips_info_dir / f'{corpus_name}_{base_name}_clips_info.json'
+        with open(file_path, 'r') as f:
+            clips_info = json.load(f)
+
+        if legacy_conversion:
+            # add missing fields and replace the file
+            clips_info = legacy_convert_clips_info(clips_info, file_path, source_video_path, self.calculate_padding)
+
+        return [ClipInfo(**clip) for clip in clips_info]
 
     def consume_gap(self, gaps: List[GapInfo], chosen_start: float, chosen_end: float):
         """Remove the chosen interval from the gaps
@@ -90,7 +113,7 @@ class Corpus(ABC):
                     new_gaps.append(GapInfo(start=chosen_end, end=gap.end))
         return new_gaps
     
-    def find_matching_no_gesture_clip(self, id: int, gaps: list, gesture_duration: float, output_path: Path, type: str=None):
+    def find_matching_no_gesture_clip(self, id: int, gaps: list, gesture_duration: float, output_path: Path, video_duration: float, source_video_path: Path, type: str=None):
         """Find a gap that can accommodate the gesture clip duration
             If no gaps are long enough, reduce the required duration by a factor and check again
             If no gaps are long enough, return None"""
@@ -107,13 +130,18 @@ class Corpus(ABC):
         gap = random.choice(valid_gaps)
         max_start = gap.end - gesture_duration
         random_start = random.uniform(gap.start, max_start)
+        padded_start, padded_end = self.calculate_padding(random_start, random_start + gesture_duration, video_duration)
         
         return ClipInfo(
             id=id,
             label=self.no_gesture_label,
             start=random_start,
             end=random_start + gesture_duration,
+            padded_start=padded_start,
+            padded_end=padded_end,
+            video_duration=video_duration,
             output_path=output_path,
+            source_video_path=source_video_path,
             type=type
             )
     
@@ -122,7 +150,7 @@ class Corpus(ABC):
         no_gesture_clips = []
         for idx, clip in enumerate(gesture_clips):
             no_gesture_output = return_file_output_path(self.no_gesture_output_dir, self.name, base_name, idx, self.no_gesture_label) 
-            no_gesture_clip = self.find_matching_no_gesture_clip(idx, gaps, (clip.end - clip.start), no_gesture_output)
+            no_gesture_clip = self.find_matching_no_gesture_clip(idx, gaps, (clip.end - clip.start), no_gesture_output, clip.video_duration, clip.source_video_path)
             if no_gesture_clip is None:
                 logging.error(f"Corpus: {self.name} - Could not find suitable non-gesture interval for gesture index {clip.id} with duration {(clip.end - clip.start):.2f}s")
             gaps = self.consume_gap(gaps, no_gesture_clip.start, no_gesture_clip.end)

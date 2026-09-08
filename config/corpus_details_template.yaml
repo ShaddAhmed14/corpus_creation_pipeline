@@ -11,7 +11,8 @@ defaults:
   move_output_directory: MoveClips
   clips_info_directory: ClipsInfo/
   decreasing_factor: 0.9 # Factor to decrease clip duration for each subsequent attempt when trying to find valid clips
-  
+  padding: 1.0 # Padding in seconds to add before and after each clip
+
 corpora:
   - name: CORPUS_NAME
     directory: CORPUS_DIRECTORY_PATH # Replace with the path to the corpus directory
