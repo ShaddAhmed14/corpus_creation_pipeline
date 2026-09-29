@@ -22,7 +22,7 @@ class Multisimo(Corpus):
             self.process_annotation_file(video_path)
             print(f"Corpus {self.name} - Processed {idx + 1}/{len(video_list)} videos")
 
-    def extract_gesture_clips(self, annotation_file: Path, video_duration: float, base_name: str):
+    def extract_gesture_clips(self, annotation_file: Path, video_duration: float, base_name: str, source_video_path: Path):
         """Parse the gesture annotation file and return list of actions"""
         extracted_clips = []
         with open(annotation_file, 'r') as f:
@@ -44,13 +44,18 @@ class Multisimo(Corpus):
                                 label = self.gesture_label
                                 output_path = return_file_output_path(self.gesture_output_dir, self.name, base_name, idx, label, safe_type)
 
+                            padded_start, padded_end = self.calculate_padding(start_frame, end_frame, video_duration)
                             clip_info = ClipInfo(
                                 id=idx,
                                 label=label,
                                 type=safe_type,
                                 start=start_frame,
                                 end=end_frame,       
-                                output_path=output_path
+                                output_path=output_path,
+                                padded_start=padded_start,
+                                padded_end=padded_end,
+                                video_duration=video_duration,
+                                source_video_path=source_video_path
                             )
                             extracted_clips.append(clip_info)
                     except ValueError as e:
@@ -61,28 +66,30 @@ class Multisimo(Corpus):
     def process_annotation_file(self, video_path: Path):
         """Process a single video file"""
         base_name = video_path.stem
-        if self.check_clips_info_exists(base_name, self.name):
-            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping processing.")
-            return # Skip processing if clips info already exists for this file
-        
-        annotation_file_path = self.directory / f"{base_name}.txt"
-        if not os.path.exists(annotation_file_path):
-            logging.error(f"Corpus {self.name}: No annotation file found for {video_path}")
-            return
-        
-        video_duration = get_video_info(video_path)['duration']
-                
-        gesture_clips = self.extract_gesture_clips(annotation_file_path, video_duration, base_name)
-        if not gesture_clips:
-            logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file_path}")
-            return
-        
-        gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
-        if not gaps:
-            logging.error(f"Corpus {self.name}: No valid gaps between gestures found for video {video_path}")
-            return
-        no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
+        if not self.check_clips_info_exists(base_name, self.name):
+            logging.info(f"Corpus {self.name} - Processing video {video_path}")
+            annotation_file_path = self.directory / f"{base_name}.txt"
+            if not os.path.exists(annotation_file_path):
+                logging.error(f"Corpus {self.name}: No annotation file found for {video_path}")
+                return
+            
+            video_duration = get_video_info(video_path)['duration']
+                    
+            gesture_clips = self.extract_gesture_clips(annotation_file_path, video_duration, base_name, video_path)
+            if not gesture_clips:
+                logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file_path}")
+                return
+            
+            gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
+            if not gaps:
+                logging.error(f"Corpus {self.name}: No valid gaps between gestures found for video {video_path}")
+                return
+            no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
 
-        all_clips = gesture_clips + no_gesture_clips
-        self.save_clips_info(all_clips, base_name, self.name)
-        self.render_clips(video_path, all_clips, video_duration)
+            all_clips = gesture_clips + no_gesture_clips
+            self.save_clips_info(all_clips, base_name, self.name)
+        else:
+            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping processing.")
+            all_clips = self.load_clips_info(base_name, self.name, video_path)
+        
+        self.render_clips(video_path, all_clips)

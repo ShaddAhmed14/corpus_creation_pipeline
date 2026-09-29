@@ -27,7 +27,7 @@ class Ecolang(Corpus):
             print(f"Corpus {self.name} - Processed {idx + 1}/{len(txt_files)} annotation files")
         
 
-    def extract_gesture_clips(self, annotation_file_path: Path, video_duration: float, base_name: str) -> List[ClipInfo]: # file is txt
+    def extract_gesture_clips(self, annotation_file_path: Path, video_duration: float, base_name: str, source_video_path: Path) -> List[ClipInfo]: # file is txt
         # offsets in milliseconds
         offsets = {"ad00": 106404, "ad01": 112595, "ad02": 72247, "ad03": 113641,
            "ad04": 124305, "ad05": 178690, "ad06": 63204, "ad07": 57814,
@@ -56,12 +56,18 @@ class Ecolang(Corpus):
                             label = self.gesture_label
                         
                             if end_time > start_time and start_time >= 0 and end_time <= video_duration:
+                                padded_start, padded_end = self.calculate_padding(start_time, end_time, video_duration)
+
                                 clip_info = ClipInfo(
                                     id=idx,
                                     label=label,
                                     type=safe_type,
                                     start=start_time,
                                     end=end_time,
+                                    padded_start=padded_start,
+                                    padded_end=padded_end,
+                                    video_duration=video_duration,
+                                    source_video_path=source_video_path,
                                     output_path=gesture_output_path
                                 )
                                 extracted_gestures.append(clip_info)
@@ -73,30 +79,30 @@ class Ecolang(Corpus):
 
     def process_annotation_file(self, annotation_file: Path):
         base_name = annotation_file.stem.replace('_final', '')
-        if self.check_clips_info_exists(base_name, self.name):
-            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping processing.")
-            return # Skip processing if clips info already exists for this file
-        
-        # video_file_path = self.directory / f"{base_name}_speakerview480480.mp4"
         video_file_path = self.directory / f"{base_name}_speakerview480480.mp4"
         if not os.path.exists(video_file_path):
             video_file_path = self.directory / f"{base_name}_final.mp4" # naming convention for test videos
             if not os.path.exists(video_file_path):
                 logging.error(f"Corpus:{self.name} - No matching video file found for {annotation_file}")
                 return
-        
-        video_duration = get_video_info(video_file_path)['duration']
-        
-        gesture_clips = self.extract_gesture_clips(annotation_file, video_duration, base_name)
-        if not gesture_clips:
-            logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file}")
-            return
-        gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
-        if not gaps:
-            logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_file_path}")
-            return
-        no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
 
-        all_clips = gesture_clips + no_gesture_clips
-        self.save_clips_info(all_clips, base_name, self.name)
-        self.render_clips(video_file_path, all_clips, video_duration)
+        if not self.check_clips_info_exists(base_name, self.name):
+            logging.info(f"Corpus {self.name} - Processing video {video_file_path}")
+            video_duration = get_video_info(video_file_path)['duration']
+            gesture_clips = self.extract_gesture_clips(annotation_file, video_duration, base_name, video_file_path)
+            if not gesture_clips:
+                logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file}")
+                return
+            gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
+            if not gaps:
+                logging.error(f"Corpus: {self.name} - No valid gaps between gestures found for video {video_file_path}")
+                return
+            no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
+
+            all_clips = gesture_clips + no_gesture_clips
+            self.save_clips_info(all_clips, base_name, self.name)
+        else:
+            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping extraction.")
+            all_clips = self.load_clips_info(base_name, self.name, video_file_path)
+        
+        self.render_clips(video_file_path, all_clips)

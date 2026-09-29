@@ -21,7 +21,7 @@ class Zhubo(Corpus):
             self.process_annotation_file(video_path)
             print(f"Corpus {self.name} - Processed {idx + 1}/{len(video_list)} videos")
 
-    def extract_gesture_clips(self, annotation_file: Path, video_duration: float, base_name: str, fps: float):  
+    def extract_gesture_clips(self, annotation_file: Path, video_duration: float, base_name: str, fps: float, source_video_path: Path):  
         with open(annotation_file, 'r') as f:
             actions = json.load(f)
         
@@ -40,11 +40,17 @@ class Zhubo(Corpus):
             # Create the new filename using the requested format: ZHUBO_SPEAKERID_GESTUREID_NA
             # Where NA is the index of the gesture in the actions file
             output_file = return_file_output_path(self.gesture_output_dir, self.name, base_name, idx, self.gesture_label, "NA")
+            padded_start, padded_end = self.calculate_padding(start_time, end_time, video_duration)
+
             extracted_gestures.append(ClipInfo(
                 id=idx,
                 label=self.gesture_label,
                 start=start_time,
                 end=end_time,
+                padded_start=padded_start,
+                padded_end=padded_end,
+                video_duration=video_duration,
+                source_video_path=source_video_path,
                 output_path=output_file
             ))
         return extracted_gestures
@@ -53,44 +59,46 @@ class Zhubo(Corpus):
         """Process a single video file"""
         # Get the video identifier (filename without extension)
         base_name = video_file_path.stem.replace('.h264', '')
-        if self.check_clips_info_exists(base_name, self.name):
-            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping processing.")
-            return # Skip processing if clips info already exists for this file
-
-        # Extract speaker ID and gesture ID from the filename
-        # Assuming filename format like "123-456.h264.mp4" where 123 is speakerID and 456 is gestureID
-        try:
-            filename_parts = base_name.split('-')
-            speaker_id = filename_parts[0]
-            gesture_base_id = filename_parts[1] if len(filename_parts) > 1 else "unknown"
-        except Exception as e:
-            logging.error(f"Corpus {self.name} - Error parsing filename {base_name}: {e}")
-            speaker_id = "unknown"
-            gesture_base_id = "unknown"
-        
-        # Get the actions file path
-        annotation_file = self.directory / f"{base_name}.actions.json"
-        
-        # Get video information
-        video_info = get_video_info(video_file_path)
-        fps = video_info['fps']
-        video_duration = video_info['duration']
-        
-        if fps == 0 or video_duration == 0:
-            logging.error(f"Corpus {self.name} - Could not get video info for {video_file_path}")
-            return
+        if not self.check_clips_info_exists(base_name, self.name):
+            logging.info(f"Corpus {self.name} - Processing video {video_file_path}")
+            # Extract speaker ID and gesture ID from the filename
+            # Assuming filename format like "123-456.h264.mp4" where 123 is speakerID and 456 is gestureID
+            try:
+                filename_parts = base_name.split('-')
+                speaker_id = filename_parts[0]
+                gesture_base_id = filename_parts[1] if len(filename_parts) > 1 else "unknown"
+            except Exception as e:
+                logging.error(f"Corpus {self.name} - Error parsing filename {base_name}: {e}")
+                speaker_id = "unknown"
+                gesture_base_id = "unknown"
             
-        gesture_clips = self.extract_gesture_clips(annotation_file, video_duration, base_name, fps)
-        if not gesture_clips:
-            logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file}")
-            return
-        
-        gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
-        if not gaps:
-            logging.error(f"Corpus {self.name}: No valid gaps between gestures found for video {video_file_path}")
-            return
-        no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
+            # Get the actions file path
+            annotation_file = self.directory / f"{base_name}.actions.json"
+            
+            # Get video information
+            video_info = get_video_info(video_file_path)
+            fps = video_info['fps']
+            video_duration = video_info['duration']
+            
+            if fps == 0 or video_duration == 0:
+                logging.error(f"Corpus {self.name} - Could not get video info for {video_file_path}")
+                return
+                
+            gesture_clips = self.extract_gesture_clips(annotation_file, video_duration, base_name, fps, video_file_path)
+            if not gesture_clips:
+                logging.error(f"Corpus {self.name} - No valid gesture clips extracted from {annotation_file}")
+                return
+            
+            gaps = self.find_gaps_between_gestures(gesture_clips, video_duration)
+            if not gaps:
+                logging.error(f"Corpus {self.name}: No valid gaps between gestures found for video {video_file_path}")
+                return
+            no_gesture_clips = self.extract_no_gesture_clips(gesture_clips, gaps, base_name)
 
-        all_clips = gesture_clips + no_gesture_clips
-        self.save_clips_info(all_clips, base_name, self.name)
-        self.render_clips(video_file_path, all_clips, video_duration)
+            all_clips = gesture_clips + no_gesture_clips
+            self.save_clips_info(all_clips, base_name, self.name)
+        else:
+            logging.info(f"Corpus {self.name} - Clips info already exists for {base_name}, skipping processing.")
+            all_clips = self.load_clips_info(base_name, self.name, video_file_path)
+
+        self.render_clips(video_file_path, all_clips)
